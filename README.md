@@ -15,6 +15,17 @@ Mini MLOps stack on top of the original WDBC Airflow data pipeline:
 | MLflow UI | http://127.0.0.1:15010 |
 | API | http://127.0.0.1:18011 |
 
+## Ảnh chụp màn hình
+
+QA smoke E2E (MLflow + FastAPI serving) — **PASS**: DAG `wdbc_pipeline` đủ 6 task SUCCESS, model `breast-cancer-classifier` có nhiều version trên Registry, API `/health` + `/predict` phục vụ từ `models:/…/<version>`.
+
+| Mô tả | Ảnh |
+|-------|-----|
+| Airflow — DAG `wdbc_pipeline` Grid, cả 6 task SUCCESS (`ingest` → `validate` → `split` → `scale` → `train_register` → `report`) | ![Airflow Grid](docs/qa/airflow-grid.png) |
+| Airflow — Graph view, `train_register` sau `scale` (song song với `report`) | ![Airflow Graph](docs/qa/airflow-graph.png) |
+| MLflow — Registry `breast-cancer-classifier` với nhiều version đã đăng ký | ![MLflow Registry](docs/qa/mlflow-registry.png) |
+| FastAPI — Swagger `/docs` với `GET /health` và `POST /predict` | ![API docs](docs/qa/api-docs.png) |
+
 ## Setup (Docker — recommended)
 
 ```bash
