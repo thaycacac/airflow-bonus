@@ -8,3 +8,7 @@ logs/
 data/staging/
 data/raw/*.orig
 .env
+mlflow-data/mlflow.db
+mlflow-data/mlartifacts/
+*.pyc
+.DS_Store

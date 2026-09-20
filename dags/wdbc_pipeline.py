@@ -1,13 +1,15 @@
 """
-DDM501 Tutorial 03 — a data pipeline that runs
+DDM501 airflow-bonus — data pipeline + train/register into MLflow.
 
-Five tasks: ingest -> validate -> split -> scale -> report.
+Six tasks: ingest -> validate -> split -> scale -> train_register -> report.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import os
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -37,7 +39,7 @@ def run_dir(ds: str) -> Path:
 
 @dag(
     dag_id="wdbc_pipeline",
-    description="Breast cancer extract: ingest, validate, split, scale",
+    description="Breast cancer extract: ingest, validate, split, scale, train_register",
     schedule="@daily",
     start_date=datetime(2026, 8, 20),
     catchup=False,
@@ -47,7 +49,7 @@ def run_dir(ds: str) -> Path:
         "retry_delay": timedelta(seconds=10),
         "retry_exponential_backoff": True,
     },
-    tags=["ddm501", "tutorial-03"],
+    tags=["ddm501", "airflow-bonus", "mlops"],
 )
 def wdbc_pipeline():
 
@@ -143,6 +145,39 @@ def wdbc_pipeline():
         return {"scaled_columns": len(numeric), "fitted_on": len(train)}
 
     @task
+    def train_register(scaling: dict, ds: str = None) -> dict:
+        """Train on staging parquet and register the model in MLflow.
+
+        Runs in the isolated /opt/ml-venv so Airflow's constrained site-packages
+        stay untouched (separate image for mlflow/api/trainer services).
+        """
+        cmd = [
+            "/opt/ml-venv/bin/python",
+            "/opt/airflow/scripts/train_and_register.py",
+            "--ds",
+            str(ds),
+        ]
+        log.info("running: %s", " ".join(cmd))
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=os.environ.copy(),
+        )
+        if result.stdout:
+            log.info(result.stdout[-4000:])
+        if result.returncode != 0:
+            raise AirflowFailException(
+                f"train_register failed ({result.returncode}): {result.stderr[-2000:]}"
+            )
+        return {
+            "scaled_columns": scaling.get("scaled_columns"),
+            "ds": ds,
+            "returncode": result.returncode,
+        }
+
+    @task
     def report(validation: dict, split_info: dict, scaling: dict, ds: str = None) -> str:
         """One line per run, appended to a log the whole pipeline shares."""
         summary = {"ds": ds, **validation, **split_info, **scaling}
@@ -162,6 +197,7 @@ def wdbc_pipeline():
     split_info = split(validated)
     scaling = scale(validated)
     split_info >> scaling
+    train_register(scaling)
     report(validated, split_info, scaling)
 
 

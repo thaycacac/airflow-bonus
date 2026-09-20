@@ -1,0 +1,13 @@
+# Shared by mlflow / api / trainer (and the isolated Airflow ML venv).
+# Kept separate from Airflow constraints to avoid pandas/numpy pin clashes.
+mlflow==2.19.0
+scikit-learn==1.6.0
+numpy==2.2.1
+pandas==2.2.3
+# pyarrow 14 was built against NumPy 1.x; 18+ matches NumPy 2.2.
+pyarrow==18.1.0
+joblib==1.4.2
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4

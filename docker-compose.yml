@@ -1,36 +1,42 @@
-# Tutorial 03 — Airflow
+# airflow-bonus — Airflow data pipeline + MLflow registry + FastAPI serving
 #
-#   docker compose up -d --build      # first time: builds the image, then starts it
-#   docker compose ps                 # wait for STATUS = healthy (about a minute)
-#   docker compose exec airflow cat /opt/airflow/standalone_admin_password.txt
+#   docker compose up -d --build
+#   docker compose ps                 # airflow + mlflow healthy
+#   docker compose run --rm trainer
+#   docker compose restart api
+#   curl -s localhost:18011/health
 #
-# On Linux, first create a .env file next to this one containing:
-#     AIRFLOW_UID=1000                # the number `id -u` prints
-#
-# Then open http://127.0.0.1:18080 and log in as `admin`.
+# On Linux, set AIRFLOW_UID / UID_GID in .env to what `id -u` prints.
 
-name: ddm501-t03
+name: airflow-bonus
 
 services:
   airflow:
-    build: .
-    image: ddm501-t03-airflow:2.8.4
-    container_name: ddm501-t03-airflow
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: airflow-bonus-airflow:2.8.4
+    container_name: airflow-bonus-airflow
     command: standalone
     ports:
-      # 18080, not 8080: Lab 2's Airflow already owns 8080 and you will want
-      # to run both at some point.
       - "18080:8080"
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: ${MODEL_NAME:-breast-cancer-classifier}
+      GIT_PYTHON_REFRESH: quiet
     user: "${AIRFLOW_UID:-50000}:0"
     volumes:
       - ./dags:/opt/airflow/dags
       - ./data:/opt/airflow/data
       - ./logs:/opt/airflow/logs
+      - ./scripts:/opt/airflow/scripts
+    depends_on:
+      mlflow:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 15s
@@ -38,3 +44,62 @@ services:
       retries: 20
       start_period: 60s
     restart: unless-stopped
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: airflow-bonus-ml:2.19.0
+    container_name: airflow-bonus-mlflow
+    ports:
+      - "15010:5000"
+    user: "${UID_GID:-0}:0"
+    volumes:
+      - ./mlflow-data:/work/mlflow-data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: airflow-bonus-ml:2.19.0
+    container_name: airflow-bonus-api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "18011:8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: ${MODEL_NAME:-breast-cancer-classifier}
+      MODEL_VERSION: ${MODEL_VERSION:-1}
+    user: "${UID_GID:-0}:0"
+    restart: unless-stopped
+
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: airflow-bonus-ml:2.19.0
+    profiles: ["tools"]
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: ${MODEL_NAME:-breast-cancer-classifier}
+      N_TREES: ${N_TREES:-200}
+      GIT_PYTHON_REFRESH: quiet
+    user: "${UID_GID:-0}:0"
+    volumes:
+      - ./scripts:/work/scripts
+      - ./data:/work/data
+    command: ["python", "scripts/train_and_register.py"]
